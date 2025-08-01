@@ -1,14 +1,27 @@
 import { Request, Response } from "express"
 import prisma from "../db"
 import { CuisineType, DietType } from "@prisma/client"
+import { redis } from "../redis"
 
 const getDishes = async (req: Request, res: Response) => {
     try {
         const { skip = 0, take = 10 } = req.query
+
+        const redisKey = "dishes"
+        const cachedData = await redis.get<any>(redisKey)
+
+        if (cachedData) {
+            if (cachedData) {
+                res.status(200).json(cachedData)
+                return
+            }
+        }
         const dishes = await prisma.dish.findMany({
             skip: Number(skip),
             take: Number(take)
         })
+
+        redis.set(redisKey, dishes, { ex: 300 })
         res.json(dishes)
         return
     } catch (error) {
@@ -25,6 +38,13 @@ const GetIndianCuisineDishes = async (req: Request, res: Response) => {
             res.status(400).json({ message: "Invalid cuisine type" });
             return
         }
+        const redisKey = "IndianCuisineDishes"
+
+        const cachedData = await redis.get<any>(redisKey)
+        if (cachedData) {
+            res.status(200).json(cachedData)
+            return
+        }
 
         const dishes = await prisma.dish.findMany({
             where: {
@@ -33,6 +53,8 @@ const GetIndianCuisineDishes = async (req: Request, res: Response) => {
             skip: Number(skip),
             take: Number(take)
         })
+
+        redis.set(redisKey, dishes, { ex: 300 })
         res.json(dishes)
         return
     } catch (error) {
@@ -47,6 +69,14 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
             res.status(400).json({ message: "Invalid diet type" })
             return
         }
+
+        const redisKey = "DietTypeDishes"
+        const cachedData = await redis.get<any>(redisKey)
+        if (cachedData) {
+            res.status(200).json(cachedData)
+            return
+        }
+
         const dishes = await prisma.dish.findMany({
             where: {
                 diet: diet as DietType
@@ -54,6 +84,8 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
             skip: Number(skip),
             take: Number(take)
         })
+
+        redis.set(redisKey, dishes, { ex: 300 })
         res.json(dishes)
         return
     } catch (error) {
