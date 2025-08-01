@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum CuisineType {
+  Indian
+  South_Indian
+  Goan
+  North_Indian
+  Assamese
+  Tamil_Nadu
+  Karnataka
+  Malvani
+  Kerala
+  Gujarati
+  Sindhi
+  Konkan
+  Hyderabadi
+  Andhra
+  Coorg
+  Bengali
+  Mangalorean
+  Kongunadu
+  Punjabi
+  Udupi
+  Chettinad
+  Indo_Chinese
+  Parsi
+  Rajasthani
+  Kashmiri
+  Mughlai
+  Bihari
+  Maharashtrian
+  North_East_India
+  Himachal
+  Uttar_Pradesh
+  Awadhi
+  Oriya
+  Uttarakhand
+  Lucknowi
+  Haryana
+  Malabar
+  Jharkhand
+  Nagaland
+}
+
+enum DietType {
+  Vegetarian
+  Non_Vegetarian 
+  Diabetic_Friendly
+  High_Protein_Non_Vegetarian
+  High_Protein_Vegetarian
+  Eggetarian
+  Gluten_Free
+}
+
+model Dish {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  name        String     @unique
+  image_url   String
+  cuisine     CuisineType
+  description String
+  diet        DietType
+  prep_time   String
+}
