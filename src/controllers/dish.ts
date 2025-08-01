@@ -7,7 +7,7 @@ const getDishes = async (req: Request, res: Response) => {
     try {
         const { skip = 0, take = 10 } = req.query
 
-        const redisKey = "dishes"
+        const redisKey = `dishes:${skip}:${take}`
         const cachedData = await redis.get<any>(redisKey)
 
         if (cachedData) {
@@ -32,35 +32,46 @@ const getDishes = async (req: Request, res: Response) => {
 
 const GetIndianCuisineDishes = async (req: Request, res: Response) => {
     try {
-        const { skip = 0, take = 10, cuisine = "Indian" } = req.query
+        const { skip = "0", take = "10", cuisine = "Indian" } = req.query;
 
         if (typeof cuisine !== "string") {
-            res.status(400).json({ message: "Invalid cuisine type" });
-            return
+            return res.status(400).json({ message: "Invalid cuisine type" });
         }
-        const redisKey = "IndianCuisineDishes"
 
-        const cachedData = await redis.get<any>(redisKey)
+        const parsedSkip = parseInt(skip as string, 10);
+        const parsedTake = parseInt(take as string, 10);
+
+        if (isNaN(parsedSkip) || isNaN(parsedTake)) {
+            return res.status(400).json({ message: "Skip and take must be valid numbers" });
+        }
+
+        const redisKey = `IndianCuisineDishes:${cuisine}:${parsedSkip}:${parsedTake}`;
+
+        const cachedData = await redis.get(redisKey);
         if (cachedData) {
-            res.status(200).json(cachedData)
-            return
+            res.status(200).json(cachedData);
+            return;
         }
 
         const dishes = await prisma.dish.findMany({
             where: {
                 cuisine: cuisine as CuisineType
             },
-            skip: Number(skip),
-            take: Number(take)
-        })
+            skip: parsedSkip,
+            take: parsedTake,
+        });
 
-        redis.set(redisKey, dishes, { ex: 300 })
-        res.json(dishes)
-        return
+
+        await redis.set(redisKey, JSON.stringify(dishes), { ex: 300 });
+
+        res.status(200).json(dishes);
+        return;
     } catch (error) {
-        res.status(500).json({ message: "Failed to fetch Indian cuisine dishes" })
+        console.error("GetIndianCuisineDishes Error:", error);
+        res.status(500).json({ message: "Failed to fetch Indian cuisine dishes" });
+        return
     }
-}
+};
 
 const GetDietTypeDishes = async (req: Request, res: Response) => {
     try {
@@ -70,7 +81,7 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
             return
         }
 
-        const redisKey = "DietTypeDishes"
+        const redisKey = `DietTypeDishes${diet}:${skip}:${take}`
         const cachedData = await redis.get<any>(redisKey)
         if (cachedData) {
             res.status(200).json(cachedData)
