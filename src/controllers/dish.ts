@@ -203,4 +203,45 @@ const GetDish = async (req: Request, res: Response) => {
     }
 };
 
-export { getDishes, GetDietTypeDishes, GetDishes, searchDishes, GetDish };
+const GetSuggestions = async (req: Request, res: Response) => {
+    try {
+        const { q } = req.query;
+
+        if (!q || typeof q !== "string" || q.length < 3) {
+            return res.status(400).json({ suggestions: [] });
+        }
+
+        const redisKey = `suggestions:${q}`;
+        const cachedSuggestions = await redis.get(redisKey);
+
+        if (cachedSuggestions) {
+            res.status(200).json(cachedSuggestions);
+            return;
+        }
+
+
+        const suggestions = await prisma.dish.findMany({
+            where: {
+                name: {
+                    contains: q,
+                    mode: 'insensitive',
+                }
+            },
+            take: 10,
+            select: {
+                name: true
+            }
+        });
+
+        redis.set(redisKey, suggestions, { ex: 300 });
+
+        res.status(200).json(suggestions);
+        return;
+    }
+    catch (error) {
+        console.log("GetSuggestions error:", error);
+        res.status(500).json({ suggestions: [] });
+        return
+    }
+}
+export { getDishes, GetDietTypeDishes, GetDishes, searchDishes, GetDish, GetSuggestions };
