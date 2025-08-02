@@ -1,13 +1,14 @@
 import { RequestHandler, Router } from "express"
-import { getDishes, GetDietTypeDishes, GetIndianCuisineDishes, searchDishesByName } from "../controllers/dish"
+import { getDishes, GetDietTypeDishes, GetDishes, searchDishes, GetDish } from "../controllers/dish"
 import { rateLimiter } from "../ratelimiter"
 
 const router = Router()
 
-router.use(rateLimiter(15, 60000) as RequestHandler)
+router.use(rateLimiter(35, 60000) as RequestHandler)
 router.get("/GetDishes", getDishes)
 router.get("/GetDietTypeDishes", GetDietTypeDishes)
-router.get("/GetIndianCuisineDishes", GetIndianCuisineDishes)
-router.get("/searchDishesByName", searchDishesByName)
+router.get("/GetIndianCuisineDishes", GetDishes)
+router.get("/searchDishes", searchDishes)
+router.get("/GetDish", GetDish)
 
 export default router
