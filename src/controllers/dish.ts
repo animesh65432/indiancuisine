@@ -203,6 +203,11 @@ const GetDish = async (req: Request, res: Response) => {
     }
 };
 
+function escapeRegex(string: string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+
 const GetSuggestions = async (req: Request, res: Response) => {
     try {
         const { q } = req.query;
@@ -214,16 +219,29 @@ const GetSuggestions = async (req: Request, res: Response) => {
         const redisKey = `suggestions:${q}`;
         const cachedSuggestions = await redis.get(redisKey);
 
+        const sanitizedSearchTerm = escapeRegex(q.trim());
+
         if (cachedSuggestions) {
             res.status(200).json(cachedSuggestions);
             return;
         }
 
+        const checkIsalreadyExists = await prisma.dish.findFirst({
+            where: {
+                name: {
+                    equals: sanitizedSearchTerm,
+                    mode: 'insensitive',
+                }
+            }
+        });
+        if (checkIsalreadyExists) {
+            return res.status(200).json([{ name: checkIsalreadyExists.name }]);
+        }
 
         const suggestions = await prisma.dish.findMany({
             where: {
                 name: {
-                    contains: q,
+                    contains: sanitizedSearchTerm,
                     mode: 'insensitive',
                 }
             },
