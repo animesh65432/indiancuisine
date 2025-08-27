@@ -1,6 +1,6 @@
 import { Request, Response } from "express"
 import prisma from "../db"
-import { CuisineType, DietType } from "@prisma/client"
+import { $Enums, CuisineType, DietType, LanguageTypes } from "@prisma/client"
 import { redis } from "../redis"
 
 const getDishes = async (req: Request, res: Response) => {
@@ -75,7 +75,7 @@ const GetDishes = async (req: Request, res: Response) => {
 
 const GetDietTypeDishes = async (req: Request, res: Response) => {
     try {
-        const { page = "0", limit = "30", diet = "Vegetarian" } = req.query;
+        const { page = "0", limit = "30", diet = "Vegetarian", lan = "en" } = req.query;
 
         if (typeof diet !== "string" || !diet) {
             res.status(400).json({ message: "Invalid diet type" });
@@ -88,31 +88,109 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
 
 
         const redisKey = `DietTypeDishes:${diet}:${currentPage}:${itemsPerPage}`;
-        const cachedData = await redis.get<any>(redisKey);
+        // const cachedData = await redis.get<any>(redisKey);
 
-        if (cachedData) {
-            res.status(200).json(cachedData);
-            return;
+        // if (cachedData) {
+        //     res.status(200).json(cachedData);
+        //     return;
+        // }
+        let alltotalItems = 0;
+        let alldishes: { id: string; name: string; image_url: string; cuisine: $Enums.CuisineType; description: string; diet: $Enums.DietType; prep_time: string }[] = [];
+        if (lan === "en") {
+            const [dishes, totalItems] = await Promise.all([
+                prisma.dish.findMany({
+                    where: { diet: diet as DietType },
+                    skip: skip,
+                    take: itemsPerPage,
+                    orderBy: { name: 'asc' }
+                }),
+                prisma.dish.count({
+                    where: { diet: diet as DietType }
+                })
+            ]);
+            alldishes = dishes
+            alltotalItems = totalItems
+        }
+        else {
+            const dishes = await prisma.$runCommandRaw({
+                aggregate: 'Dish',
+                pipeline: [
+                    { $match: { diet: diet } },
+                    {
+                        $lookup: {
+                            from: "LanguagesDish",
+                            localField: "_id",
+                            foreignField: "dishId",
+                            as: "langs"
+                        }
+                    },
+                    {
+                        $addFields: {
+                            lang: {
+                                $arrayElemAt: [{
+                                    $filter: {
+                                        input: "$langs",
+                                        as: "l",
+                                        cond: { $eq: ["$$l.language", lan] }
+                                    }
+                                }, 0]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            id: { $toString: "$_id" },
+                            name: { $ifNull: ["$lang.name", "$name"] },
+                            image_url: 1,
+                            cuisine: { $ifNull: ["$lang.cuisine", "$cuisine"] },
+                            description: { $ifNull: ["$lang.description", "$description"] },
+                            diet: 1,
+                            prep_time: { $ifNull: ["$lang.prep_time", "$prep_time"] }
+                        }
+
+                    },
+                    { $skip: skip },
+                    { $limit: itemsPerPage }
+                ],
+                explain: false
+            }) as any;
+            const totalItemsAgg = await prisma.$runCommandRaw({
+                aggregate: "Dish",
+                pipeline: [
+                    { $match: { diet: diet } },
+                    {
+                        $lookup: {
+                            from: "LanguagesDish",
+                            localField: "_id",
+                            foreignField: "dishId",
+                            as: "langs",
+                        },
+                    },
+                    {
+                        $addFields: {
+                            lang: {
+                                $arrayElemAt: [
+                                    { $filter: { input: "$langs", as: "l", cond: { $eq: ["$$l.language", lan] } } },
+                                    0,
+                                ],
+                            },
+                        },
+                    },
+                    { $count: "totalItems" },
+                ],
+                explain: false,
+            });
+            alldishes = dishes?.cursor?.firstBatch || []
+            const totalItemsArray = totalItemsAgg as unknown as { totalItems: number }[];
+            alltotalItems = totalItemsArray[0]?.totalItems ?? 0;
         }
 
-        const [dishes, totalItems] = await Promise.all([
-            prisma.dish.findMany({
-                where: { diet: diet as DietType },
-                skip: skip,
-                take: itemsPerPage,
-                orderBy: { name: 'asc' }
-            }),
-            prisma.dish.count({
-                where: { diet: diet as DietType }
-            })
-        ]);
-
         const response = {
-            dishes,
-            totalItems
+            dishes: alldishes,
+            totalItems: alltotalItems
         };
 
-        await redis.set(redisKey, JSON.stringify(response), { ex: 300 });
+        // await redis.set(redisKey, JSON.stringify(response), { ex: 300 });
         res.status(200).json(response);
 
     } catch (error) {
@@ -171,12 +249,12 @@ const searchDishes = async (req: Request, res: Response) => {
 
 const GetDish = async (req: Request, res: Response) => {
     try {
-        const { id } = req.query;
+        const { id, lan = "en" } = req.query;
 
         if (!id || typeof id !== "string") {
             return res.status(400).json({ message: "Invalid dish Id" });
         }
-        const redisKey = `dish:${id}`;
+        const redisKey = `dish:${id}-${lan}`;
         const cachedDish = await redis.get(redisKey);
 
         if (cachedDish) {
@@ -184,17 +262,42 @@ const GetDish = async (req: Request, res: Response) => {
             return;
         }
 
-        const dish = await prisma.dish.findUnique({
+        const checkIsalreadyExists = await prisma.dish.findUnique({
             where: { id }
         });
 
-        if (!dish) {
-            return res.status(404).json({ message: "Dish not found" });
+        if (!checkIsalreadyExists) {
+            res.status(404).json({ message: "Dish not found" });
+            return
         }
 
-        redis.set(redisKey, dish, { ex: 300 });
+        let dish;
 
-        res.status(200).json(dish);
+        if (lan !== "en") {
+            const NonengLishdish = await prisma.languagesDish.findFirst({
+                where: {
+                    dishId: checkIsalreadyExists.id,
+                    language: lan as LanguageTypes
+                }
+            })
+            dish = NonengLishdish
+        }
+
+        const responsedish = {
+            id: checkIsalreadyExists.id,
+            name: dish?.name || checkIsalreadyExists.name,
+            image_url: checkIsalreadyExists.image_url,
+            cuisine: dish?.cuisine || checkIsalreadyExists.cuisine,
+            description: dish?.description || checkIsalreadyExists.description,
+            diet: checkIsalreadyExists.diet,
+            prep_time: checkIsalreadyExists?.prep_time,
+        }
+
+
+
+        redis.set(redisKey, responsedish, { ex: 300 });
+
+        res.status(200).json(responsedish);
         return
     } catch (error) {
         console.error("GetDish error:", error);
