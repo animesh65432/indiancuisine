@@ -201,7 +201,7 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
 
 const searchDishes = async (req: Request, res: Response) => {
     try {
-        const { page = "0", limit = "30", diet, q, cuisine } = req.query;
+        const { page = "0", limit = "30", diet, q, cuisine, lan = "eng" } = req.query;
         const currentPage = parseInt(page as string, 10);
         const itemsPerPage = parseInt(limit as string, 10);
         const skip = currentPage * itemsPerPage;
@@ -220,7 +220,7 @@ const searchDishes = async (req: Request, res: Response) => {
             };
         }
 
-        if (diet && diet !== "any") {
+        if (diet && diet !== "Any") {
             filters.diet = diet;
         }
 
