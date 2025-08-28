@@ -49,6 +49,29 @@ enum CuisineType {
   Nagaland
 }
 
+enum LanguageTypes {
+  hi
+  bn
+  ta
+  te
+  mr
+  gu
+  kn
+  ml
+  pa
+  or
+  ur
+  as
+  sa
+  mai
+  sat
+  ne
+  doi
+  brx
+  mni
+}
+
+
 enum DietType {
   Vegetarian
   Non_Vegetarian 
@@ -58,7 +81,6 @@ enum DietType {
   Eggetarian
   Gluten_Free
 }
-
 model Dish {
   id          String     @id @default(auto()) @map("_id") @db.ObjectId
   name        String     @unique
@@ -67,4 +89,16 @@ model Dish {
   description String
   diet        DietType
   prep_time   String
+  Languages   LanguagesDish[]
+}
+
+model LanguagesDish {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String    
+  cuisine     String
+  description String
+  prep_time   String
+  language    LanguageTypes
+  dishId      String   @db.ObjectId
+  Dish        Dish     @relation(fields: [dishId], references: [id])
 }
