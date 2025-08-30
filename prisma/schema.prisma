@@ -83,13 +83,16 @@ enum DietType {
 }
 model Dish {
   id          String     @id @default(auto()) @map("_id") @db.ObjectId
-  name        String     @unique
+  name        String     
   image_url   String
   cuisine     CuisineType
   description String
   diet        DietType
   prep_time   String
   Languages   LanguagesDish[]
+  @@index([diet, cuisine, name])    
+  @@index([cuisine, name])          
+  @@index([name])                  
 }
 
 model LanguagesDish {
@@ -101,4 +104,7 @@ model LanguagesDish {
   language    LanguageTypes
   dishId      String   @db.ObjectId
   Dish        Dish     @relation(fields: [dishId], references: [id])
+  @@index([language, name])        
+  @@index([language, cuisine])      
+  @@index([language, dishId])            
 }
