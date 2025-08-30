@@ -82,20 +82,31 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
             return;
         }
 
+
+
         const currentPage = parseInt(page as string, 10);
         const itemsPerPage = parseInt(limit as string, 10);
         const skip = currentPage * itemsPerPage;
 
+        const redisKey = `DietTypeDishes:${diet}:${lan}:${currentPage}:${itemsPerPage}`;
+        const cachedData = await redis.get<any>(redisKey);
 
-        const redisKey = `DietTypeDishes:${diet}:${currentPage}:${itemsPerPage}`;
-        // const cachedData = await redis.get<any>(redisKey);
+        if (cachedData) {
+            res.status(200).json(cachedData);
+            return;
+        }
 
-        // if (cachedData) {
-        //     res.status(200).json(cachedData);
-        //     return;
-        // }
         let alltotalItems = 0;
-        let alldishes: { id: string; name: string; image_url: string; cuisine: $Enums.CuisineType; description: string; diet: $Enums.DietType; prep_time: string }[] = [];
+        let alldishes: {
+            id: string;
+            name: string;
+            image_url: string;
+            cuisine: $Enums.CuisineType;
+            description: string;
+            diet: $Enums.DietType;
+            prep_time: string
+        }[] = [];
+
         if (lan === "en") {
             const [dishes, totalItems] = await Promise.all([
                 prisma.dish.findMany({
@@ -108,89 +119,62 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
                     where: { diet: diet as DietType }
                 })
             ]);
-            alldishes = dishes
-            alltotalItems = totalItems
-        }
-        else {
-            const dishes = await prisma.$runCommandRaw({
-                aggregate: 'Dish',
-                pipeline: [
-                    { $match: { diet: diet } },
-                    {
-                        $lookup: {
-                            from: "LanguagesDish",
-                            localField: "_id",
-                            foreignField: "dishId",
-                            as: "langs"
+            alldishes = dishes;
+            alltotalItems = totalItems;
+        } else {
+            const [translationData, count] = await Promise.all([
+                prisma.languagesDish.findMany({
+                    where: {
+                        language: lan as LanguageTypes,
+                        Dish: {
+                            diet: diet as DietType
                         }
                     },
-                    {
-                        $addFields: {
-                            lang: {
-                                $arrayElemAt: [{
-                                    $filter: {
-                                        input: "$langs",
-                                        as: "l",
-                                        cond: { $eq: ["$$l.language", lan] }
-                                    }
-                                }, 0]
+                    select: {
+                        name: true,
+                        cuisine: true,
+                        description: true,
+                        prep_time: true,
+                        Dish: {
+                            select: {
+                                id: true,
+                                image_url: true,
+                                diet: true
                             }
                         }
                     },
-                    {
-                        $project: {
-                            id: { $toString: "$_id" },
-                            name: { $ifNull: ["$lang.name", "$name"] },
-                            image_url: 1,
-                            cuisine: { $ifNull: ["$lang.cuisine", "$cuisine"] },
-                            description: { $ifNull: ["$lang.description", "$description"] },
-                            diet: 1,
-                            prep_time: { $ifNull: ["$lang.prep_time", "$prep_time"] }
+                    skip: skip,
+                    take: itemsPerPage,
+                    orderBy: { name: 'asc' }
+                }),
+                prisma.languagesDish.count({
+                    where: {
+                        language: lan as LanguageTypes,
+                        Dish: {
+                            diet: diet as DietType
                         }
+                    }
+                })
+            ]);
 
-                    },
-                    { $skip: skip },
-                    { $limit: itemsPerPage }
-                ],
-                explain: false
-            }) as any;
-            const totalItemsAgg = await prisma.$runCommandRaw({
-                aggregate: "Dish",
-                pipeline: [
-                    { $match: { diet: diet } },
-                    {
-                        $lookup: {
-                            from: "LanguagesDish",
-                            localField: "_id",
-                            foreignField: "dishId",
-                            as: "langs",
-                        },
-                    },
-                    {
-                        $addFields: {
-                            lang: {
-                                $arrayElemAt: [
-                                    { $filter: { input: "$langs", as: "l", cond: { $eq: ["$$l.language", lan] } } },
-                                    0,
-                                ],
-                            },
-                        },
-                    },
-                    { $count: "totalItems" },
-                ],
-                explain: false,
-            });
-            alldishes = dishes?.cursor?.firstBatch || []
-            const totalItemsArray = totalItemsAgg as unknown as { totalItems: number }[];
-            alltotalItems = totalItemsArray[0]?.totalItems ?? 0;
+            alldishes = translationData.map(translation => ({
+                id: translation.Dish.id,
+                name: translation.name,
+                image_url: translation.Dish.image_url,
+                cuisine: translation.cuisine as CuisineType,
+                description: translation.description,
+                diet: translation.Dish.diet,
+                prep_time: translation.prep_time
+            }));
+            alltotalItems = count
         }
 
         const response = {
             dishes: alldishes,
-            totalItems: alltotalItems
+            totalItems: alltotalItems,
         };
 
-        // await redis.set(redisKey, JSON.stringify(response), { ex: 300 });
+        await redis.set(redisKey, JSON.stringify(response), { ex: 300 });
         res.status(200).json(response);
 
     } catch (error) {
@@ -198,52 +182,128 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
         res.status(500).json({ message: "Failed to fetch diet type dishes" });
     }
 }
-
 const searchDishes = async (req: Request, res: Response) => {
     try {
-        const { page = "0", limit = "30", diet, q, cuisine, lan = "eng" } = req.query;
+        const { page = "0", limit = "30", diet, q, cuisine, lan = "en" } = req.query;
         const currentPage = parseInt(page as string, 10);
         const itemsPerPage = parseInt(limit as string, 10);
         const skip = currentPage * itemsPerPage;
+        console.log(q, "queryname", lan)
 
-        const filters: any = {
-            name: {
-                contains: q,
-                mode: 'insensitive',
+        let alldishes: { id: string; name: string; image_url: string; cuisine: $Enums.CuisineType; description: string; diet: $Enums.DietType; prep_time: string }[] = [];
+        let alltotalItems = 0;
+
+        if (lan === "en") {
+            const filters: any = {};
+            if (q) {
+                filters.name = {
+                    contains: q as string,
+                    mode: 'insensitive',
+                };
             }
-        };
 
-        if (q) {
-            filters.name = {
-                contains: q as string,
-                mode: 'insensitive',
+            if (diet && diet !== "Any") {
+                filters.diet = diet;
+            }
+
+            if (cuisine) {
+                filters.cuisine = cuisine;
+            }
+
+            const [dishes, totalItems] = await Promise.all([
+                prisma.dish.findMany({
+                    where: filters,
+                    skip: skip,
+                    take: itemsPerPage,
+                    orderBy: { name: 'asc' }
+                }),
+                prisma.dish.count({
+                    where: filters
+                })
+            ]);
+
+            alldishes = dishes;
+            alltotalItems = totalItems;
+        } else {
+
+            const translationFilters: any = {
+                language: lan as LanguageTypes,
             };
+
+            // Search by name
+            if (q) {
+                translationFilters.name = {
+                    contains: q,
+                    mode: 'insensitive',
+                };
+            }
+
+            // Cuisine filter
+            if (cuisine) {
+                translationFilters.cuisine = {
+                    contains: cuisine,
+                    mode: 'insensitive',
+                };
+            }
+
+            // Diet filter (nested Dish)
+            if (diet && diet !== "Any") {
+                translationFilters.Dish = {
+                    diet: diet as DietType,
+                };
+            }
+
+            const [translationData, count] = await Promise.all([
+                prisma.languagesDish.findMany({
+                    where: translationFilters,   // ✅ now using all filters
+                    select: {
+                        name: true,
+                        cuisine: true,
+                        description: true,
+                        prep_time: true,
+                        Dish: {
+                            select: {
+                                id: true,
+                                image_url: true,
+                                diet: true,
+                            },
+                        },
+                    },
+                    skip,
+                    take: itemsPerPage,
+                    orderBy: { name: 'asc' },
+                }),
+
+                prisma.languagesDish.count({
+                    where: translationFilters,
+                }),
+            ]);
+
+            alldishes = translationData.map((translation) => ({
+                id: translation.Dish.id,
+                name: translation.name,
+                image_url: translation.Dish.image_url,
+                cuisine: translation.cuisine as CuisineType,
+                description: translation.description,
+                diet: translation.Dish.diet,
+                prep_time: translation.prep_time,
+            }));
+
+            alltotalItems = count;
+
         }
 
-        if (diet && diet !== "Any") {
-            filters.diet = diet;
-        }
-
-        if (cuisine) {
-            filters.cuisine = cuisine;
-        }
-
-        const [dishes, totalItems] = await Promise.all([
-            prisma.dish.findMany({
-                where: filters,
-                skip: skip,
-                take: itemsPerPage,
-                orderBy: { name: 'asc' }
-            }),
-            prisma.dish.count({
-                where: filters
-            })
-        ]);
-
-        res.status(200).json({ dishes, totalItems });
+        res.status(200).json({
+            dishes: alldishes,
+            totalItems: alltotalItems,
+            currentPage: currentPage,
+            totalPages: Math.ceil(alltotalItems / itemsPerPage)
+        });
+        return
     } catch (error) {
         console.error("Search error:", error);
         res.status(500).json({ message: "Failed to search dishes" });
+        return
     }
 };
 
@@ -313,13 +373,14 @@ function escapeRegex(string: string) {
 
 const GetSuggestions = async (req: Request, res: Response) => {
     try {
-        const { q } = req.query;
+        const { q, lan = "en" } = req.query;
 
         if (!q || typeof q !== "string" || q.length < 3) {
             return res.status(400).json({ suggestions: [] });
         }
 
-        const redisKey = `suggestions:${q}`;
+
+        const redisKey = `suggestions:${q}-${lan}`;
         const cachedSuggestions = await redis.get(redisKey);
 
         const sanitizedSearchTerm = escapeRegex(q.trim());
@@ -329,30 +390,61 @@ const GetSuggestions = async (req: Request, res: Response) => {
             return;
         }
 
-        const checkIsalreadyExists = await prisma.dish.findFirst({
-            where: {
-                name: {
-                    equals: sanitizedSearchTerm,
-                    mode: 'insensitive',
+        let checkIsalreadyExists
+
+        if (lan === "en") {
+            checkIsalreadyExists = await prisma.dish.findFirst({
+                where: {
+                    name: {
+                        equals: sanitizedSearchTerm,
+                        mode: 'insensitive',
+                    }
                 }
-            }
-        });
+            });
+        }
+        else {
+            checkIsalreadyExists = await prisma.languagesDish.findFirst({
+                where: {
+                    name: {
+                        equals: sanitizedSearchTerm,
+                        mode: 'insensitive',
+                    }
+                }
+            });
+        }
         if (checkIsalreadyExists) {
             return res.status(200).json([{ name: checkIsalreadyExists.name }]);
         }
+        let suggestions
 
-        const suggestions = await prisma.dish.findMany({
-            where: {
-                name: {
-                    contains: sanitizedSearchTerm,
-                    mode: 'insensitive',
+        if (lan === "en") {
+            suggestions = await prisma.dish.findMany({
+                where: {
+                    name: {
+                        contains: sanitizedSearchTerm,
+                        mode: 'insensitive',
+                    }
+                },
+                take: 10,
+                select: {
+                    name: true
                 }
-            },
-            take: 10,
-            select: {
-                name: true
-            }
-        });
+            });
+        }
+        else {
+            suggestions = await prisma.languagesDish.findMany({
+                where: {
+                    name: {
+                        contains: sanitizedSearchTerm,
+                        mode: 'insensitive',
+                    }
+                },
+                take: 10,
+                select: {
+                    name: true
+                }
+            });
+        }
 
         redis.set(redisKey, suggestions, { ex: 300 });
 
