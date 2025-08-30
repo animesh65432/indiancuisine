@@ -81,9 +81,6 @@ const GetDietTypeDishes = async (req: Request, res: Response) => {
             res.status(400).json({ message: "Invalid diet type" });
             return;
         }
-
-
-
         const currentPage = parseInt(page as string, 10);
         const itemsPerPage = parseInt(limit as string, 10);
         const skip = currentPage * itemsPerPage;
